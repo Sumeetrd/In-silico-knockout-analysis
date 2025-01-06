@@ -1,0 +1,92 @@
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(igraph)
+
+# Set the folder path containing all module files
+folder_path <- "Network_60_genes/"  # Replace with your folder path
+output_folder <- "Network_60_genes/Results/"  # Output folder for saving results
+
+# Create the output folder if it doesn't exist
+if (!dir.exists(output_folder)) {
+  dir.create(output_folder)
+}
+
+# Get a list of all files in the folder
+file_list <- list.files(folder_path, pattern = "\\.tsv$", full.names = TRUE)
+
+# Process each file in the folder
+for (file_path in file_list) {
+  # Extract the module name from the file name
+  module_name <- tools::file_path_sans_ext(basename(file_path))
+  
+  # Step 1: Load the dataset
+  data <- read.table(file_path, header = TRUE, sep = "\t")
+  
+  # Step 2: Combine node1 and node2 into a single column to calculate degrees
+  all_nodes <- c(data$node1, data$node2)
+  
+  # Calculate the degree for each gene
+  degree_count <- as.data.frame(table(all_nodes))
+  colnames(degree_count) <- c("Gene", "Degree")
+  
+  # Sort genes by degree in descending order
+  hub_genes <- degree_count %>%
+    arrange(desc(Degree))
+  
+  # Save the hub gene list to a CSV file
+  hub_genes_file <- paste0(output_folder, module_name, "_hub_genes.csv")
+  write.csv(hub_genes, hub_genes_file, row.names = FALSE)
+  
+  # Step 3: Load the data into an igraph object for network analysis
+  graph <- graph_from_data_frame(data, directed = FALSE)
+  
+  # Step 4: Define the top hub genes to analyze for impact
+  top_hub_genes <- head(hub_genes, 10)
+  genes_to_remove <- top_hub_genes$Gene
+  
+  # Step 5: Initialize a list to store impact analysis results
+  impact_analysis <- list()
+
+  # Analyze the impact for each hub gene
+  for (gene in genes_to_remove) {
+    if (gene %in% V(graph)$name) {
+      # Create a copy of the graph and remove the gene
+      temp_graph <- delete_vertices(graph, gene)
+      
+      # Identify directly affected genes (neighbors of the removed gene)
+      directly_affected_genes <- unique(neighbors(graph, gene, mode = "all")$name)
+      
+      # Compute metrics
+      lcc_size_before <- max(components(graph)$csize)  # Largest connected component before removal
+      lcc_size_after <- max(components(temp_graph)$csize)  # Largest connected component after removal
+      num_edges_after <- ecount(temp_graph)  # Number of edges after removal
+      
+      # Store results
+      impact_analysis[[gene]] <- list(
+        "Removed Gene" = gene,
+        "Directly Affected Genes" = paste(directly_affected_genes, collapse = ", "),
+        "Genes with Lost Connectivity" = length(directly_affected_genes),
+        "Whole Network LCC Size" = lcc_size_before,
+        "Current Network LCC Size" = lcc_size_after,
+        "Connectivity Impact" = num_edges_after
+      )
+    }
+  }
+  
+  # Step 6: Convert results to a data frame
+  impact_df <- do.call(rbind, lapply(impact_analysis, as.data.frame))
+  impact_df <- data.frame(impact_df)
+  
+  # Save the impact analysis results to a CSV file
+  impact_file <- paste0(output_folder, module_name, "_Impact_Analysis_Table.csv")
+  write.csv(impact_df, impact_file, row.names = FALSE)
+  
+  # Print a message indicating successful processing of the module
+  print(paste("Processed module:", module_name))
+}
+
+print("All modules have been processed and results saved.")
+
+```
+
